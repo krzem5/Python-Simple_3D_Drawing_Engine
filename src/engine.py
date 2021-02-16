@@ -195,11 +195,13 @@ class Graphics:
 
 	def projection(self,t,*a):
 		if (t==ORTOGRAPHIC):
-			raise RuntimeError
+			if (len(a)!=6):
+				raise TypeError(f"Ortographic Projection requires 6 Arguments (top, left, bottom, right, near, far)!")
+			self._pm=(t,a[0],a[1],a[2],a[3],a[4],a[5])
 		elif (t==PERSPECTIVE):
 			if (len(a)!=3):
-				raise TypeError(f"Perspective Projection requires 3 Arguments (FOV, near, far)!")
-			self._pm=(t,a[0],a[1],a[2])
+				raise TypeError(f"Perspective Projection requires 3 Arguments (fov, near, far)!")
+			self._pm=(t,math.cos(a[0]/360*math.pi)/math.sin(a[0]/360*math.pi),a[1],a[2])
 		else:
 			raise NameError(f"Unknown Projection Type Value '{t}'!")
 		self._update_p()
@@ -253,9 +255,11 @@ class Graphics:
 
 
 	def _update_p(self):
-		yScale=math.cos(self._pm[1]/360*math.pi)/math.sin(self._pm[1]/360*math.pi)
-		xScale=yScale/self.h*self.w
-		self._p_m=(xScale,0,0,0,yScale,0,0,0,(self._pm[3]+self._pm[2])/(self._pm[3]-self._pm[2]),0,0,(2*self._pm[2]*self._pm[3])/(self._pm[2]-self._pm[3]))
+		if (self._pm[0]==ORTOGRAPHIC):
+			t,l,b,r=self._pm[1:5]
+			self._p_m=(2/(r-l),0,0,0,2/(t-b),0,0,0,-2/(self._pm[6]-self._pm[5]),-(r+l)/(r-l),-(t+b)/(t-b),(self._pm[6]+self._pm[5])/(self._pm[6]-self._pm[5]))
+		else:
+			self._p_m=(self._pm[1]/self.w*self.h,0,0,0,self._pm[1],0,0,0,(self._pm[3]+self._pm[2])/(self._pm[3]-self._pm[2]),0,0,(2*self._pm[2]*self._pm[3])/(self._pm[2]-self._pm[3]))
 
 
 
@@ -263,6 +267,6 @@ class Graphics:
 		nx=x*self._c_m[0]+y*self._c_m[3]+z*self._c_m[6]+self._c_m[9]
 		ny=x*self._c_m[1]+y*self._c_m[4]+z*self._c_m[7]+self._c_m[10]
 		nz=x*self._c_m[2]+y*self._c_m[5]+z*self._c_m[8]+self._c_m[11]
-		nnx=(nx*self._p_m[0]+ny*self._p_m[3]+nz*self._p_m[6]+self._p_m[9])/nz
-		nny=(nx*self._p_m[1]+ny*self._p_m[4]+nz*self._p_m[7]+self._p_m[10])/nz
-		return ((nnx*self.w)/(2*nz)+self.w/2,(nny*self.h)/(2*nz)+self.h/2,(nx*self._p_m[2]+ny*self._p_m[5]+nz*self._p_m[8]+self._p_m[11])/nz)
+		nnx=(nx*self._p_m[0]+ny*self._p_m[3]+nz*self._p_m[6]+self._p_m[9])/(nz if self._pm[0]==PERSPECTIVE else 1)
+		nny=(nx*self._p_m[1]+ny*self._p_m[4]+nz*self._p_m[7]+self._p_m[10])/(nz if self._pm[0]==PERSPECTIVE else 1)
+		return ((nnx*self.w)/(2*nz)+self.w/2,(nny*self.h)/(2*nz)+self.h/2,(nx*self._p_m[2]+ny*self._p_m[5]+nz*self._p_m[8]+self._p_m[11])/(nz if self._pm[0]==PERSPECTIVE else 1))
