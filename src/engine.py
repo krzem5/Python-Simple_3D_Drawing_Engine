@@ -8,6 +8,7 @@ LINES=0
 TRIANGLES=1
 ORTOGRAPHIC=0
 PERSPECTIVE=1
+EPSILON=0.0001
 
 
 
@@ -17,7 +18,12 @@ class BaseCamera:
 
 
 
-	def update(self,dt):
+	def __setup_cam__(self,e):
+		raise NotImplementedError
+
+
+
+	def __update__(self,dt):
 		raise NotImplementedError
 
 
@@ -68,7 +74,12 @@ class StaticCamera(BaseCamera):
 
 
 
-	def update(self,dt):
+	def __setup_cam__(self,e):
+		pass
+
+
+
+	def __update__(self,dt):
 		pass
 
 
@@ -101,11 +112,100 @@ class StaticCamera(BaseCamera):
 
 
 
+class OrbitalCamera(BaseCamera):
+	def __init__(self,x,y,z,rx,ry,d,ux,uy,uz):
+		self.x=x
+		self.y=y
+		self.z=z
+		self.rx=rx
+		self.ry=ry
+		self.d=d
+		self.ux=ux
+		self.uy=uy
+		self.uz=uz
+		self._ra=0
+		self._l=True
+		self._d=None
+		self._u=True
+
+
+
+	def lock(self,l):
+		self._l=l
+
+
+
+	def rotate_around(self,t):
+		self._ra=2*math.pi/t
+
+
+
+	def __setup_cam__(self,e):
+		def _up(_):
+			if (self._l):
+				self.d=min(self.d+0.05,20)
+				self._u=True
+		def _down(_):
+			if (self._l):
+				self.d=max(self.d-0.05,0.05)
+				self._u=True
+		def _drag(a):
+			if (self._d is not None):
+				if (self._l):
+					self.rx=min(max(self.rx-(a.y-self._d[1])*0.01,EPSILON),math.pi)
+					# self.ry+=(a.x-self._d[0])*0.01
+					self._u=True
+			self._d=(a.x,a.y)
+		def _drag_stop(_):
+			self._d=None
+		e.bind_key("<Up>",_up)
+		e.bind_key("<Down>",_down)
+		e.bind_key("<B1-Motion>",_drag)
+		e.bind_key("<ButtonRelease-1>",_drag_stop)
+
+
+
+	def __update__(self,dt):
+		self.ry+=self._ra*dt
+		if (self._ra):
+			self._u=True
+
+
+
+	def __updated__(self):
+		return self._u
+
+
+
+	def __recalc_matrix__(self,e):
+		self._u=False
+		px=math.sin(self.rx)*math.cos(self.ry)*self.d
+		py=math.cos(self.rx)*self.d
+		pz=math.sin(self.rx)*math.sin(self.ry)*self.d
+		m=math.sqrt(px**2+py**2+pz**2)
+		zx=-px/m
+		zy=-py/m
+		zz=-pz/m
+		px+=self.x
+		py+=self.y
+		pz+=self.z
+		xx=self.uy*zz-self.uz*zy
+		xy=self.uz*zx-self.ux*zz
+		xz=self.ux*zy-self.uy*zx
+		m=math.sqrt(xx**2+xy**2+xz**2)
+		if (m==0):
+			m=1
+		xx/=m
+		xy/=m
+		xz/=m
+		yx=zy*xz-zz*xy
+		yy=zz*xx-zx*xz
+		yz=zx*xy-zy*xx
+		return (xx,xy,xz,yx,yy,yz,zx,zy,zz,-xx*px-xy*py-xz*pz,-yx*px-yy*py-yz*pz,-zx*px-zy*py-zz*pz)
+
+
+
 class ShapeBuffer(BaseCanvasElement):
-	__slots__=["vl","il","_m","_u","_dt"]
-
-
-
 	def __init__(self,vl,il,m=LINES,cl="#ffffff"):
 		self.vl=vl
 		self.il=il
@@ -130,18 +230,9 @@ class ShapeBuffer(BaseCanvasElement):
 			ll=[]
 			for i in range(0,len(self.il),3):
 				t=self.il[i:i+3]
-				if ((tp[t[0]][2]>=0 and tp[t[0]][2]<=1) or (tp[t[1]][2]>=0 and tp[t[1]][2]<=1)):
-					ll.append((tp[t[0]][0],tp[t[0]][1],tp[t[1]][0],tp[t[1]][1],self.cl))
-				else:
-					print(f"Skip: {tp[t[0]]} -> {tp[t[1]]}")
-				if ((tp[t[1]][2]>=0 and tp[t[1]][2]<=1) or (tp[t[2]][2]>=0 and tp[t[2]][2]<=1)):
-					ll.append((tp[t[1]][0],tp[t[1]][1],tp[t[2]][0],tp[t[2]][1],self.cl))
-				else:
-					print(f"Skip: {tp[t[1]]} -> {tp[t[2]]}")
-				if ((tp[t[2]][2]>=0 and tp[t[2]][2]<=1) or (tp[t[0]][2]>=0 and tp[t[0]][2]<=1)):
-					ll.append((tp[t[2]][0],tp[t[2]][1],tp[t[0]][0],tp[t[0]][1],self.cl))
-				else:
-					print(f"Skip: {tp[t[2]]} -> {tp[t[0]]}")
+				ll.append((tp[t[0]][0],tp[t[0]][1],tp[t[1]][0],tp[t[1]][1],self.cl))
+				ll.append((tp[t[1]][0],tp[t[1]][1],tp[t[2]][0],tp[t[2]][1],self.cl))
+				ll.append((tp[t[2]][0],tp[t[2]][1],tp[t[0]][0],tp[t[0]][1],self.cl))
 			self._dt=(tuple(ll),tuple())
 		elif (self.m==TRIANGLES):
 			print("Tri")
@@ -172,6 +263,8 @@ class Graphics:
 		self._lt=0
 		self._ll=[]
 		self._tl=[]
+		self._f_u=False
+		self._kb={}
 
 
 
@@ -186,10 +279,23 @@ class Graphics:
 
 
 
+	def bind_key(self,k,f):
+		def _cb(a,k=k):
+			for f in self._kb[k]:
+				f(a)
+		if (k not in self._kb):
+			self._r.bind(k,lambda a:_cb(a))
+			self._kb[k]=[f]
+		else:
+			self._kb[k]+=[f]
+
+
+
 	def camera(self,c):
 		if (not isinstance(c,BaseCamera)):
 			raise RuntimeError(f"Camera of Type '{e.__class__.__name__}' is not compatible!")
 		self._cm=c
+		self._cm.__setup_cam__(self)
 
 
 
@@ -211,7 +317,7 @@ class Graphics:
 	def draw(self,e):
 		if (not isinstance(e,BaseCanvasElement)):
 			raise RuntimeError(f"Element of Type '{e.__class__.__name__}' is not compatible!")
-		if (e.__updated__()):
+		if (e.__updated__() or self._f_u):
 			e.__recalc_flatten__(self)
 		ll,tl=e.__flatten_data__()
 		self._ll.extend(ll)
@@ -237,9 +343,11 @@ class Graphics:
 			self._lt=tm
 		self._ll=[]
 		self._tl=[]
-		self._cm.update(tm-self._lt)
+		self._f_u=False
+		self._cm.__update__(tm-self._lt)
 		if (self._cm.__updated__()):
 			self._c_m=self._cm.__recalc_matrix__(self)
+			self._f_u=True
 		self._cb(tm-self._lt)
 		self._c.delete(tkinter.ALL)
 		if (self._p_u):
@@ -267,6 +375,6 @@ class Graphics:
 		nx=x*self._c_m[0]+y*self._c_m[3]+z*self._c_m[6]+self._c_m[9]
 		ny=x*self._c_m[1]+y*self._c_m[4]+z*self._c_m[7]+self._c_m[10]
 		nz=x*self._c_m[2]+y*self._c_m[5]+z*self._c_m[8]+self._c_m[11]
-		nnx=(nx*self._p_m[0]+ny*self._p_m[3]+nz*self._p_m[6]+self._p_m[9])/(nz if self._pm[0]==PERSPECTIVE else 1)
-		nny=(nx*self._p_m[1]+ny*self._p_m[4]+nz*self._p_m[7]+self._p_m[10])/(nz if self._pm[0]==PERSPECTIVE else 1)
-		return ((nnx*self.w)/(2*nz)+self.w/2,(nny*self.h)/(2*nz)+self.h/2,(nx*self._p_m[2]+ny*self._p_m[5]+nz*self._p_m[8]+self._p_m[11])/(nz if self._pm[0]==PERSPECTIVE else 1))
+		nnx=(nx*self._p_m[0]+ny*self._p_m[3]+nz*self._p_m[6]+self._p_m[9])/((nz if nz!=0 else EPSILON) if self._pm[0]==PERSPECTIVE else 1)
+		nny=(nx*self._p_m[1]+ny*self._p_m[4]+nz*self._p_m[7]+self._p_m[10])/((nz if nz!=0 else EPSILON) if self._pm[0]==PERSPECTIVE else 1)
+		return ((nnx*self.w)/(2*nz if nz!=0 else EPSILON)+self.w/2,(nny*self.h)/(2*nz if nz!=0 else EPSILON)+self.h/2,(nx*self._p_m[2]+ny*self._p_m[5]+nz*self._p_m[8]+self._p_m[11])/((nz if nz!=0 else EPSILON) if self._pm[0]==PERSPECTIVE else 1))
